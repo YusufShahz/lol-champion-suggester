@@ -1,0 +1,117 @@
+body {
+    font-family: 'Roboto', sans-serif;
+    background: #f4f7fa;
+    color: #222;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 760px;
+    margin: 40px auto;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+    padding: 32px 24px 36px 24px;
+}
+
+h1 {
+    text-align: center;
+    font-size: 2.2rem;
+    margin-bottom: 28px;
+    color: #4361ee;
+    font-weight: 800;
+}
+
+.pick-section {
+    margin-bottom: 32px;
+}
+
+.pick-section h2 {
+    font-size: 1.2rem;
+    color: #495057;
+    margin-bottom: 10px;
+    font-weight: 700;
+}
+
+.pick-select {
+    width: 180px;
+    padding: 8px 12px;
+    margin: 0 10px 14px 0;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+    background: #f8f9fa;
+    font-size: 1rem;
+    color: #333;
+    outline: none;
+    transition: border 0.2s;
+}
+.pick-select:focus {
+    border-color: #4361ee;
+}
+
+button#suggestBtn {
+    display: block;
+    margin: 18px auto 0 auto;
+    background: #4361ee;
+    color: #fff;
+    border: none;
+    border-radius: 30px;
+    padding: 12px 36px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(67,97,238,0.09);
+    transition: background 0.2s, transform 0.2s;
+}
+button#suggestBtn:hover {
+    background: #3a56d4;
+    transform: translateY(-2px);
+}
+
+.suggestions-container {
+    margin-top: 36px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    justify-content: center;
+}
+.suggestion-card {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(67,97,238,0.07);
+    padding: 18px 20px 14px 20px;
+    width: 220px;
+    text-align: center;
+}
+.suggestion-card h3 {
+    margin: 0 0 8px 0;
+    color: #4361ee;
+    font-size: 1.3rem;
+    font-weight: 700;
+}
+.suggestion-card .score {
+    color: #222;
+    font-size: 1rem;
+    margin-bottom: 8px;
+}
+.suggestion-card ul {
+    padding-left: 18px;
+    text-align: left;
+    color: #495057;
+    font-size: 0.97rem;
+}
+@media (max-width: 600px) {
+    .container {
+        padding: 14px 2vw;
+    }
+    .pick-select {
+        width: 100%;
+        margin-bottom: 10px;
+    }
+    .suggestion-card {
+        width: 98vw;
+        min-width: unset;
+    }
+}

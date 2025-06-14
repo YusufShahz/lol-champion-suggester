@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoL Champion Suggester</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1>League of Legends Champion Suggester</h1>
+        <form id="pickForm" onsubmit="return false;">
+            <div class="pick-section">
+                <h2>Your Team</h2>
+                <div id="allyPicks">
+                    {# Only allow 4 ally picks #}
+                    {% for i in range(4) %}
+                    <select class="pick-select" id="ally{{i}}">
+                        <option value="">-- Select Champion --</option>
+                        {% for champ in champions %}
+                        <option value="{{ champ }}">{{ champ }}</option>
+                        {% endfor %}
+                    </select>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="pick-section">
+                <h2>Enemy Team</h2>
+                <div id="enemyPicks">
+                    {% for i in range(5) %}
+                    <select class="pick-select" id="enemy{{i}}">
+                        <option value="">-- Select Champion --</option>
+                        {% for champ in champions %}
+                        <option value="{{ champ }}">{{ champ }}</option>
+                        {% endfor %}
+                    </select>
+                    {% endfor %}
+                </div>
+            </div>
+            <button type="button" id="readScreenBtn">Read from Screen</button>
+            <button type="button" id="suggestBtn">Suggest Champion</button>
+        </form>
+        <div id="suggestions" class="suggestions-container"></div>
+    </div>
+    <script>
+    document.getElementById('readScreenBtn').onclick = async function() {
+        const res = await fetch('/read_champion_select', {method: 'POST'});
+        const data = await res.json();
+        // Fill ally picks
+        (data.ally_picks || []).forEach((name, i) => {
+            let sel = document.getElementById('ally'+i);
+            if (sel) sel.value = name;
+        });
+        // Fill enemy picks
+        (data.enemy_picks || []).forEach((name, i) => {
+            let sel = document.getElementById('enemy'+i);
+            if (sel) sel.value = name;
+        });
+    };
+    document.getElementById('suggestBtn').onclick = async function() {
+        const allyPicks = [];
+        const enemyPicks = [];
+        // Only collect up to 4 ally picks
+        for (let i = 0; i < 4; i++) {
+            let ally = document.getElementById('ally'+i).value;
+            if (ally) allyPicks.push(ally);
+        }
+        for (let i = 0; i < 5; i++) {
+            let enemy = document.getElementById('enemy'+i).value;
+            if (enemy) enemyPicks.push(enemy);
+        }
+        const res = await fetch('/suggest', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ally_picks: allyPicks, enemy_picks: enemyPicks})
+        });
+        const suggestions = await res.json();
+        const container = document.getElementById('suggestions');
+        if (!suggestions.length) {
+            container.innerHTML = '<p>No suggestions found. Try different picks.</p>';
+            return;
+        }
+        container.innerHTML = suggestions.map(s => `
+            <div class="suggestion-card">
+                <h3>${s.champion}</h3>
+                <div class="score">Score: ${s.score}</div>
+                <ul>${s.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+            </div>
+        `).join('');
+    };
+    </script>
+</body>
+</html>
