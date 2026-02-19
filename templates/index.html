@@ -1,94 +1,332 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LoL Champion Suggester</title>
+    <meta name="description"
+        content="Get the best champion pick based on enemy counters, team synergy, and role needs.">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Tom Select for searchable dropdowns -->
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 </head>
+
 <body>
     <div class="container">
-        <h1>League of Legends Champion Suggester</h1>
+        <header class="app-header">
+            <h1>⚔️ Champion Suggester</h1>
+            <p class="subtitle">Find the perfect pick for your team</p>
+        </header>
+
+        <!-- LCU Status Banner -->
+        <div id="lcuStatus" class="lcu-status lcu-disconnected">
+            <span id="lcuStatusDot" class="status-dot"></span>
+            <span id="lcuStatusText">Client not detected</span>
+            <label class="auto-toggle">
+                <input type="checkbox" id="autoDetectToggle">
+                <span>Auto-detect</span>
+            </label>
+        </div>
+
         <form id="pickForm" onsubmit="return false;">
-            <div class="pick-section">
-                <h2>Your Team</h2>
-                <div id="allyPicks">
-                    {# Only allow 4 ally picks #}
-                    {% for i in range(4) %}
-                    <select class="pick-select" id="ally{{i}}">
-                        <option value="">-- Select Champion --</option>
-                        {% for champ in champions %}
-                        <option value="{{ champ }}">{{ champ }}</option>
-                        {% endfor %}
-                    </select>
-                    {% endfor %}
+            <!-- Role selection -->
+            <div class="role-bar">
+                <span class="role-label">Your Role</span>
+                <div class="role-pills" id="rolePills">
+                    <button type="button" class="role-pill active" data-role="">All</button>
+                    <button type="button" class="role-pill" data-role="Top">Top</button>
+                    <button type="button" class="role-pill" data-role="Jungle">Jungle</button>
+                    <button type="button" class="role-pill" data-role="Mid">Mid</button>
+                    <button type="button" class="role-pill" data-role="ADC">ADC</button>
+                    <button type="button" class="role-pill" data-role="Support">Support</button>
                 </div>
             </div>
-            <div class="pick-section">
-                <h2>Enemy Team</h2>
-                <div id="enemyPicks">
-                    {% for i in range(5) %}
-                    <select class="pick-select" id="enemy{{i}}">
-                        <option value="">-- Select Champion --</option>
-                        {% for champ in champions %}
-                        <option value="{{ champ }}">{{ champ }}</option>
+
+            <div class="picks-grid">
+                <div class="pick-section">
+                    <h2 class="section-title allies-title">Your Team</h2>
+                    <div class="pick-list" id="allyPicks">
+                        {% for i in range(4) %}
+                        <select class="pick-select" id="ally{{i}}" placeholder="Pick ally...">
+                            <option value="">-- Select --</option>
+                            {% for champ in champions %}
+                            <option value="{{ champ }}">{{ champ }}</option>
+                            {% endfor %}
+                        </select>
                         {% endfor %}
-                    </select>
-                    {% endfor %}
+                    </div>
+                </div>
+                <div class="pick-section">
+                    <h2 class="section-title enemies-title">Enemy Team</h2>
+                    <div class="pick-list" id="enemyPicks">
+                        {% for i in range(5) %}
+                        <select class="pick-select" id="enemy{{i}}" placeholder="Pick enemy...">
+                            <option value="">-- Select --</option>
+                            {% for champ in champions %}
+                            <option value="{{ champ }}">{{ champ }}</option>
+                            {% endfor %}
+                        </select>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
-            <button type="button" id="readScreenBtn">Read from Screen</button>
-            <button type="button" id="suggestBtn">Suggest Champion</button>
+
+            <div class="button-group">
+                <button type="button" id="readClientBtn" class="btn btn-secondary">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path
+                            d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5A5.5 5.5 0 1113.5 8 5.51 5.51 0 018 13.5zM8 4a1 1 0 00-1 1v3a1 1 0 00.29.71l2 2a1 1 0 101.42-1.42L9 7.59V5a1 1 0 00-1-1z" />
+                    </svg>
+                    Read from Client
+                </button>
+                <button type="button" id="suggestBtn" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 1l2.47 5.01L16 6.64l-4 3.9.94 5.46L8 13.27 3.06 16l.94-5.46-4-3.9 5.53-.63z" />
+                    </svg>
+                    Suggest Champions
+                </button>
+            </div>
         </form>
+
+        <!-- Loading spinner -->
+        <div id="loadingSpinner" class="loading-spinner" style="display:none;">
+            <div class="spinner"></div>
+            <span>Analyzing matchups...</span>
+        </div>
+
         <div id="suggestions" class="suggestions-container"></div>
+        <button type="button" id="showMoreBtn" class="btn btn-outline show-more-btn" style="display:none;">Show
+            More</button>
     </div>
+
     <script>
-    document.getElementById('readScreenBtn').onclick = async function() {
-        const res = await fetch('/read_champion_select', {method: 'POST'});
-        const data = await res.json();
-        // Fill ally picks
-        (data.ally_picks || []).forEach((name, i) => {
-            let sel = document.getElementById('ally'+i);
-            if (sel) sel.value = name;
-        });
-        // Fill enemy picks
-        (data.enemy_picks || []).forEach((name, i) => {
-            let sel = document.getElementById('enemy'+i);
-            if (sel) sel.value = name;
-        });
-    };
-    document.getElementById('suggestBtn').onclick = async function() {
-        const allyPicks = [];
-        const enemyPicks = [];
-        // Only collect up to 4 ally picks
-        for (let i = 0; i < 4; i++) {
-            let ally = document.getElementById('ally'+i).value;
-            if (ally) allyPicks.push(ally);
+        // --- Globals ---
+        let currentCount = 5;
+        let eventSource = null;
+        let autoSuggestEnabled = false;
+        let ddVersion = '';
+        let iconKeys = {};
+        let tomSelects = {};
+        let selectedRole = '';
+
+        // --- Init: fetch ddragon info and setup Tom Select ---
+        async function init() {
+            try {
+                const resp = await fetch('/api/ddragon');
+                const data = await resp.json();
+                ddVersion = data.version;
+                iconKeys = data.icon_keys;
+            } catch (e) { console.warn('Could not load ddragon info'); }
+            setupTomSelects();
+            setupRolePills();
         }
-        for (let i = 0; i < 5; i++) {
-            let enemy = document.getElementById('enemy'+i).value;
-            if (enemy) enemyPicks.push(enemy);
+
+        function getChampIconUrl(champName) {
+            if (!ddVersion || !iconKeys[champName]) return '';
+            return `https://ddragon.leagueoflegends.com/cdn/${ddVersion}/img/champion/${iconKeys[champName]}.png`;
         }
-        const res = await fetch('/suggest', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ally_picks: allyPicks, enemy_picks: enemyPicks})
+
+        function setupTomSelects() {
+            document.querySelectorAll('.pick-select').forEach(sel => {
+                const ts = new TomSelect(sel, {
+                    maxItems: 1,
+                    allowEmptyOption: true,
+                    create: false,
+                    sortField: { field: 'text', direction: 'asc' },
+                    render: {
+                        option: function (data, escape) {
+                            const url = getChampIconUrl(data.text);
+                            const img = url ? `<img src="${url}" class="ts-icon" alt="">` : '';
+                            return `<div class="ts-option-row">${img}<span>${escape(data.text)}</span></div>`;
+                        },
+                        item: function (data, escape) {
+                            const url = getChampIconUrl(data.text);
+                            const img = url ? `<img src="${url}" class="ts-icon" alt="">` : '';
+                            return `<div class="ts-item-row">${img}<span>${escape(data.text)}</span></div>`;
+                        }
+                    }
+                });
+                tomSelects[sel.id] = ts;
+            });
+        }
+
+        function setupRolePills() {
+            document.querySelectorAll('.role-pill').forEach(pill => {
+                pill.addEventListener('click', function () {
+                    document.querySelectorAll('.role-pill').forEach(p => p.classList.remove('active'));
+                    this.classList.add('active');
+                    selectedRole = this.dataset.role;
+                });
+            });
+        }
+
+        function setRolePill(role) {
+            document.querySelectorAll('.role-pill').forEach(p => {
+                p.classList.toggle('active', p.dataset.role === role);
+            });
+            selectedRole = role;
+        }
+
+        // --- LCU Status ---
+        const autoToggle = document.getElementById('autoDetectToggle');
+        const statusBanner = document.getElementById('lcuStatus');
+        const statusText = document.getElementById('lcuStatusText');
+
+        function setStatus(state, text) {
+            statusBanner.className = 'lcu-status lcu-' + state;
+            statusText.textContent = text;
+        }
+
+        function applyLcuData(data) {
+            for (let i = 0; i < 4; i++) {
+                const ts = tomSelects['ally' + i];
+                const name = (data.ally_picks || [])[i] || '';
+                if (ts) ts.setValue(name, true);
+            }
+            for (let i = 0; i < 5; i++) {
+                const ts = tomSelects['enemy' + i];
+                const name = (data.enemy_picks || [])[i] || '';
+                if (ts) ts.setValue(name, true);
+            }
+            if (data.assigned_position) {
+                setRolePill(data.assigned_position);
+            }
+        }
+
+        function startSSE() {
+            if (eventSource) return;
+            setStatus('connecting', 'Connecting...');
+            eventSource = new EventSource('/lcu/stream');
+            eventSource.onmessage = function (event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'champ_select') {
+                    setStatus('active', 'In Champion Select' + (data.phase ? ' — ' + data.phase : ''));
+                    applyLcuData(data);
+                    if (autoSuggestEnabled) fetchAndRenderSuggestions(currentCount);
+                    autoSuggestEnabled = true;
+                } else if (data.type === 'idle') {
+                    setStatus('connected', 'Client running — waiting for champ select');
+                    autoSuggestEnabled = false;
+                } else if (data.type === 'error') {
+                    setStatus('disconnected', data.message || 'Error');
+                }
+            };
+            eventSource.onerror = function () {
+                setStatus('disconnected', 'Connection lost — retrying...');
+                stopSSE();
+                setTimeout(() => { if (autoToggle.checked) startSSE(); }, 5000);
+            };
+        }
+
+        function stopSSE() {
+            if (eventSource) { eventSource.close(); eventSource = null; }
+            autoSuggestEnabled = false;
+        }
+
+        autoToggle.addEventListener('change', function () {
+            if (this.checked) startSSE();
+            else { stopSSE(); setStatus('disconnected', 'Auto-detect off'); }
         });
-        const suggestions = await res.json();
-        const container = document.getElementById('suggestions');
-        if (!suggestions.length) {
-            container.innerHTML = '<p>No suggestions found. Try different picks.</p>';
-            return;
+
+        // --- Manual Read ---
+        document.getElementById('readClientBtn').onclick = async function () {
+            this.disabled = true;
+            this.querySelector('svg').classList.add('spin');
+            try {
+                const res = await fetch('/read_champion_select', { method: 'POST' });
+                const data = await res.json();
+                applyLcuData(data);
+            } catch (e) {
+                alert('Could not read from League Client. Make sure the client is running and you are in champion select.');
+            } finally {
+                this.disabled = false;
+                this.querySelector('svg').classList.remove('spin');
+            }
+        };
+
+        // --- Suggestions ---
+        async function fetchSuggestions(count) {
+            const allyPicks = [];
+            const enemyPicks = [];
+            for (let i = 0; i < 4; i++) {
+                const ts = tomSelects['ally' + i];
+                const v = ts ? ts.getValue() : '';
+                if (v) allyPicks.push(v);
+            }
+            for (let i = 0; i < 5; i++) {
+                const ts = tomSelects['enemy' + i];
+                const v = ts ? ts.getValue() : '';
+                if (v) enemyPicks.push(v);
+            }
+            const res = await fetch('/suggest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ally_picks: allyPicks, enemy_picks: enemyPicks, role: selectedRole, count: count })
+            });
+            return await res.json();
         }
-        container.innerHTML = suggestions.map(s => `
-            <div class="suggestion-card">
-                <h3>${s.champion}</h3>
-                <div class="score">Score: ${s.score}</div>
-                <ul>${s.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-            </div>
-        `).join('');
-    };
+
+        function renderSuggestions(suggestions) {
+            const container = document.getElementById('suggestions');
+            document.getElementById('loadingSpinner').style.display = 'none';
+
+            if (!suggestions.length) {
+                container.innerHTML = '<div class="empty-state">No suggestions found. Try different picks or role.</div>';
+                document.getElementById('showMoreBtn').style.display = 'none';
+                return;
+            }
+            container.innerHTML = suggestions.map((s, i) => {
+                const scoreClass = s.score >= 70 ? 'score-high' : s.score >= 40 ? 'score-mid' : 'score-low';
+                const iconUrl = getChampIconUrl(s.champion);
+                const iconHtml = iconUrl ? `<img src="${iconUrl}" class="card-champ-icon" alt="${s.champion}">` : '';
+                const reasonsHtml = s.reasons.map(r => {
+                    let cls = 'reason-role';
+                    if (r.startsWith('Counters ')) cls = 'reason-counter';
+                    else if (r.startsWith('Countered by')) cls = 'reason-countered';
+                    else if (r.startsWith('Synergizes')) cls = 'reason-synergy';
+                    return `<li class="${cls}">${r}</li>`;
+                }).join('');
+                return `
+                <div class="suggestion-card" style="animation-delay: ${i * 0.06}s">
+                    <div class="card-top">
+                        ${iconHtml}
+                        <div class="card-info">
+                            <h3>${s.champion}</h3>
+                            <span class="role-badge">${s.role}</span>
+                        </div>
+                        <div class="score ${scoreClass}">${s.score}</div>
+                    </div>
+                    <ul class="reasons-list">${reasonsHtml}</ul>
+                </div>
+            `;
+            }).join('');
+            document.getElementById('showMoreBtn').style.display = 'block';
+        }
+
+        async function fetchAndRenderSuggestions(count) {
+            document.getElementById('loadingSpinner').style.display = 'flex';
+            document.getElementById('suggestions').innerHTML = '';
+            document.getElementById('showMoreBtn').style.display = 'none';
+            const suggestions = await fetchSuggestions(count);
+            renderSuggestions(suggestions);
+        }
+
+        document.getElementById('suggestBtn').onclick = async function () {
+            currentCount = 5;
+            await fetchAndRenderSuggestions(currentCount);
+        };
+
+        document.getElementById('showMoreBtn').onclick = async function () {
+            currentCount += 5;
+            await fetchAndRenderSuggestions(currentCount);
+        };
+
+        // Boot
+        init();
     </script>
 </body>
+
 </html>
