@@ -1,110 +1,334 @@
 """
-Champion data module.
-Loads champion list, roles, counters, and synergies from JSON data files.
-Data files are in data/ directory and can be refreshed with data/update_data.py.
+Champion data layer.
+
+Loads the local data files and exposes fast lookups:
+
+  data/stats.json              per-lane tier list: tier, win / pick / ban rate,
+                               pick-ban influence, games and lane share
+  data/matchups.json           per champion and lane: damage split, matchups vs
+                               every enemy champion in every lane ("vs") and
+                               synergy with every ally champion in every lane ("with")
+  data/cdragon_champions.json  damage type, melee/ranged and playstyle ratings
+  data/ddragon_champions.json  icons and class tags
+  data/roles.json              fallback role list when stats are missing
+
+Files are re-read automatically when they change on disk (see reload_if_changed),
+so refreshing data does not require restarting the server.
 """
 
 import json
 import os
+import time
+
+import ddragon
 
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+_WATCHED = ("stats.json", "matchups.json", "cdragon_champions.json", "roles.json")
+
+ROLES = ["Top", "Jungle", "Mid", "ADC", "Support"]
+LANES = ["top", "jungle", "middle", "bottom", "support"]
+ROLE_TO_LANE = dict(zip(ROLES, LANES))
+LANE_TO_ROLE = dict(zip(LANES, ROLES))
+
+# A champion "plays" a lane when at least this share of their games are there.
+PLAYABLE_SHARE = 8.0
+
+_CDRAGON_DAMAGE = {
+    "kPhysical": {"physical": 0.85, "magic": 0.1, "true": 0.05},
+    "kMagic": {"physical": 0.1, "magic": 0.85, "true": 0.05},
+    "kMixed": {"physical": 0.5, "magic": 0.45, "true": 0.05},
+}
+_DDRAGON_DAMAGE = {
+    "AD": _CDRAGON_DAMAGE["kPhysical"],
+    "AP": _CDRAGON_DAMAGE["kMagic"],
+    "Mixed": _CDRAGON_DAMAGE["kMixed"],
+}
+
+# Populated by load()
+champions = []
+stats_meta = {}
+matchups_meta = {}
+champ_stats = {}
+ddragon_details = {}
+cdragon_details = {}
+_matchups = {}
+_roles_fallback = {}
+_lane_avg = {}
+_attr_cache = {}
+_mtimes = {}
+_last_check = 0.0
 
 
 def _load_json(filename, default=None):
-    """Load a JSON file from the data directory. Returns default if missing."""
-    filepath = os.path.join(_DATA_DIR, filename)
-    if os.path.exists(filepath):
+    path = os.path.join(_DATA_DIR, filename)
+    if os.path.exists(path):
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Warning: Could not load {filepath}: {e}")
+            print(f"Warning: could not load {path}: {e}")
     return default if default is not None else {}
 
 
-# --- Champion List ---
-# Load from data/champions.json, fallback to Data Dragon API, then static list
-_champions_data = _load_json("champions.json")
-if _champions_data:
-    champions = _champions_data
-else:
-    try:
-        from ddragon import get_champion_id_to_name
-        champions = sorted(set(get_champion_id_to_name().values()))
-    except Exception:
-        champions = [
-            "Aatrox", "Ahri", "Akali", "Alistar", "Amumu", "Anivia", "Annie", "Ashe",
-            "Blitzcrank", "Brand", "Braum", "Caitlyn", "Camille", "Cassiopeia", "Cho'Gath",
-            "Corki", "Darius", "Diana", "Draven", "Ekko", "Elise", "Evelynn", "Ezreal",
-            "Fiora", "Fizz", "Galio", "Gangplank", "Garen", "Gnar", "Gragas", "Graves",
-            "Hecarim", "Heimerdinger", "Illaoi", "Irelia", "Ivern", "Janna", "Jarvan IV",
-            "Jax", "Jayce", "Jhin", "Jinx", "Kai'Sa", "Kalista", "Karma", "Karthus",
-            "Kassadin", "Katarina", "Kayle", "Kayn", "Kennen", "Kha'Zix", "Kindred",
-            "Kled", "Kog'Maw", "LeBlanc", "Lee Sin", "Leona", "Lillia", "Lissandra",
-            "Lucian", "Lulu", "Lux", "Malphite", "Malzahar", "Maokai", "Master Yi",
-            "Miss Fortune", "Mordekaiser", "Morgana", "Nami", "Nasus", "Nautilus", "Neeko",
-            "Nidalee", "Nocturne", "Nunu & Willump", "Olaf", "Orianna", "Ornn", "Pantheon",
-            "Poppy", "Pyke", "Qiyana", "Quinn", "Rakan", "Rammus", "Rek'Sai", "Renekton",
-            "Rengar", "Riven", "Rumble", "Ryze", "Samira", "Sejuani", "Senna", "Seraphine",
-            "Sett", "Shaco", "Shen", "Shyvana", "Singed", "Sion", "Sivir", "Skarner",
-            "Sona", "Soraka", "Swain", "Sylas", "Syndra", "Tahm Kench", "Taliyah", "Talon",
-            "Taric", "Teemo", "Thresh", "Tristana", "Trundle", "Tryndamere", "Twisted Fate",
-            "Twitch", "Udyr", "Urgot", "Varus", "Vayne", "Veigar", "Vel'Koz", "Vi", "Viego",
-            "Viktor", "Vladimir", "Volibear", "Warwick", "Wukong", "Xayah", "Xerath",
-            "Xin Zhao", "Yasuo", "Yone", "Yorick", "Yuumi", "Zac", "Zed", "Ziggs",
-            "Zilean", "Zoe", "Zyra"
-        ]
+def _file_mtimes():
+    out = {}
+    for name in _WATCHED:
+        try:
+            out[name] = os.path.getmtime(os.path.join(_DATA_DIR, name))
+        except OSError:
+            out[name] = None
+    return out
 
 
-# --- Roles ---
-# Load from data/roles.json, fallback to Data Dragon API, then static mapping
-_roles_data = _load_json("roles.json")
-if _roles_data:
-    roles = _roles_data
-else:
-    try:
-        import requests
-        from ddragon import get_latest_version
-        _TAG_TO_ROLE = {
-            'Support': 'Support', 'Marksman': 'ADC', 'Mage': 'Mid',
-            'Assassin': 'Mid', 'Fighter': 'Top', 'Tank': 'Top',
-        }
-        _version = get_latest_version()
-        _url = f'https://ddragon.leagueoflegends.com/cdn/{_version}/data/en_US/champion.json'
-        _resp = requests.get(_url)
-        roles = {}
-        if _resp.status_code == 200:
-            for champ in _resp.json()['data'].values():
-                role = None
-                for tag in ['Support', 'Marksman', 'Mage', 'Assassin', 'Fighter', 'Tank']:
-                    if tag in champ['tags']:
-                        role = _TAG_TO_ROLE[tag]
-                        break
-                roles[champ['name']] = role or 'Unknown'
-    except Exception:
-        roles = {
-            "Aatrox": "Top", "Ahri": "Mid", "Akali": "Mid", "Alistar": "Support",
-            "Amumu": "Jungle", "Anivia": "Mid", "Annie": "Mid", "Ashe": "ADC",
-            "Blitzcrank": "Support", "Brand": "Support", "Braum": "Support",
-            "Caitlyn": "ADC", "Darius": "Top", "Ezreal": "ADC", "Garen": "Top",
-            "Jinx": "ADC", "Lee Sin": "Jungle", "Lux": "Support", "Thresh": "Support",
-            "Yasuo": "Mid", "Yone": "Mid", "Zed": "Mid",
-        }
+def load():
+    """(Re)load every data file into module state."""
+    global champions, stats_meta, matchups_meta, champ_stats, ddragon_details
+    global cdragon_details, _matchups, _roles_fallback, _lane_avg, _attr_cache, _mtimes
+
+    ddragon_details = ddragon.get_champion_details()
+    cdragon_details = ddragon.get_cdragon_details(refresh=True)
+
+    stats_file = _load_json("stats.json", {})
+    stats_meta = stats_file.get("_meta", {})
+    champ_stats = stats_file.get("champions", {})
+
+    matchups_file = _load_json("matchups.json", {})
+    matchups_meta = matchups_file.get("_meta", {})
+    _matchups = matchups_file.get("champions", {})
+
+    _roles_fallback = {}
+    for name, val in _load_json("roles.json", {}).items():
+        if isinstance(val, list):
+            _roles_fallback[name] = [r for r in val if r in ROLE_TO_LANE]
+        elif isinstance(val, str) and val in ROLE_TO_LANE:
+            _roles_fallback[name] = [val]
+
+    names = set(ddragon_details) | set(champ_stats)
+    champions = sorted(names) if names else _load_json("champions.json", [])
+
+    # Games-weighted lane average win rate, for stats files that don't record it
+    _lane_avg = {}
+    for lane in LANES:
+        games = wins = 0.0
+        for entry in champ_stats.values():
+            s = entry.get("lanes", {}).get(lane)
+            if s and s.get("games"):
+                games += s["games"]
+                wins += s["games"] * s.get("win_rate", 50.0)
+        _lane_avg[lane] = wins / games if games else 50.0
+
+    _attr_cache = {}
+    _mtimes = _file_mtimes()
 
 
-# --- Counter Data (from data/counters.json, populated by scrape_lolalytics.py) ---
-_counter_data = _load_json("counters.json", default={})
+def reload_if_changed(min_interval=5.0):
+    """Reload data files if any changed on disk (checked at most every min_interval s)."""
+    global _last_check
+    now = time.time()
+    if now - _last_check < min_interval:
+        return False
+    _last_check = now
+    if _file_mtimes() != _mtimes:
+        load()
+        return True
+    return False
 
-# Build the counters dict: {champion: [list of champions this champion is strong against]}
-counters = {}
-for champ in champions:
-    champ_data = _counter_data.get(champ, {})
-    strong_against = champ_data.get("strong_against", [])
-    counters[champ] = [entry["name"] for entry in strong_against]
 
-# Full counter data for weighted scoring
-counter_details = _counter_data
+# ---------------------------------------------------------------------------
+# Tier list / lanes
+# ---------------------------------------------------------------------------
+
+def lane_avg_wr(lane):
+    """Average win rate in a lane for the scraped bracket (e.g. 51.7% for Emerald+)."""
+    avg = (stats_meta.get("lane_avg_wr") or {}).get(lane)
+    return float(avg) if avg else _lane_avg.get(lane, 50.0)
 
 
-# --- Synergy Data (placeholder - no reliable data source yet) ---
-synergies = {champ: [] for champ in champions}
+def lane_stats(name, lane):
+    """Tier list stats for a champion in a lane, or None without games there."""
+    s = champ_stats.get(name, {}).get("lanes", {}).get(lane)
+    return s if s and s.get("games", 0) > 0 else None
+
+
+def lane_shares(name):
+    """{lane: % of the champion's games played there}."""
+    lanes = champ_stats.get(name, {}).get("lanes", {})
+    return {l: float(lanes[l].get("pct_lane", 0.0)) for l in LANES if l in lanes}
+
+
+def lane_distribution(name, floor=0.0):
+    """P(champion plays each lane). `floor` (in % points) keeps rare lanes possible."""
+    shares = lane_shares(name)
+    if not shares or sum(shares.values()) <= 0:
+        fallback = [ROLE_TO_LANE[r] for r in _roles_fallback.get(name, [])]
+        shares = {l: (100.0 if l in fallback else 0.0) for l in LANES} if fallback else {}
+    raw = {l: shares.get(l, 0.0) + floor for l in LANES}
+    total = sum(raw.values())
+    if total <= 0:
+        return {l: 1.0 / len(LANES) for l in LANES}
+    return {l: v / total for l, v in raw.items()}
+
+
+def main_lane(name):
+    shares = lane_shares(name)
+    if shares and max(shares.values()) > 0:
+        return max(shares, key=shares.get)
+    fallback = _roles_fallback.get(name)
+    return ROLE_TO_LANE[fallback[0]] if fallback else None
+
+
+def playable_lanes(name, min_share=PLAYABLE_SHARE):
+    """Lanes the champion genuinely plays, most-played first (main lane always included)."""
+    shares = lane_shares(name)
+    if not shares or max(shares.values()) <= 0:
+        return [ROLE_TO_LANE[r] for r in _roles_fallback.get(name, [])]
+    main = max(shares, key=shares.get)
+    lanes = [l for l in LANES if shares.get(l, 0) >= min_share or l == main]
+    return sorted(lanes, key=lambda l: -shares.get(l, 0))
+
+
+def roles_of(name):
+    return [LANE_TO_ROLE[l] for l in playable_lanes(name)]
+
+
+def main_role(name):
+    lane = main_lane(name)
+    return LANE_TO_ROLE.get(lane) if lane else None
+
+
+# ---------------------------------------------------------------------------
+# Matchups & synergy
+# ---------------------------------------------------------------------------
+
+def has_matchup_data():
+    return bool(_matchups)
+
+
+def lane_entry(name, lane):
+    """Raw matchups.json entry for a champion in a lane (games, win_rate, damage, vs, with)."""
+    return _matchups.get(name, {}).get(lane)
+
+
+def matchup(champ, lane, opp, opp_lane):
+    """
+    (win_rate, delta2, games) for `champ` in `lane` against `opp` in `opp_lane`,
+    read from either champion's table. None when they rarely meet.
+    """
+    row = _matchups.get(champ, {}).get(lane, {}).get("vs", {}).get(opp_lane, {}).get(opp)
+    if row:
+        return row[0], row[1], row[2]
+    row = _matchups.get(opp, {}).get(opp_lane, {}).get("vs", {}).get(lane, {}).get(champ)
+    if row:
+        # Each table is written from its own champion's side of the bracket, so the two
+        # win rates of a pair sum to about twice the bracket average, not 100.
+        return round(lane_avg_wr(lane) + lane_avg_wr(opp_lane) - row[0], 2), -row[1], row[2]
+    return None
+
+
+def synergy(champ, lane, ally, ally_lane):
+    """(win_rate_together, delta2, games) for two allies, or None."""
+    row = _matchups.get(champ, {}).get(lane, {}).get("with", {}).get(ally_lane, {}).get(ally)
+    if not row:
+        row = _matchups.get(ally, {}).get(ally_lane, {}).get("with", {}).get(lane, {}).get(champ)
+    return (row[0], row[1], row[2]) if row else None
+
+
+def lane_opponents(champ, lane):
+    """{opponent: [win_rate, delta2, games]} for same-lane opponents."""
+    return _matchups.get(champ, {}).get(lane, {}).get("vs", {}).get(lane, {})
+
+
+# ---------------------------------------------------------------------------
+# Champion attributes (team composition)
+# ---------------------------------------------------------------------------
+
+def damage_profile(name, lane=None):
+    """{"physical", "magic", "true"} damage fractions, measured per lane when available."""
+    lanes = _matchups.get(name, {})
+    entry = lanes.get(lane) if lane else None
+    if not (entry and entry.get("damage")):
+        shares = lane_shares(name)
+        for l in sorted(lanes, key=lambda l: -shares.get(l, 0.0)):
+            if lanes[l].get("damage"):
+                entry = lanes[l]
+                break
+    if entry and entry.get("damage"):
+        return dict(entry["damage"])
+    dt = cdragon_details.get(name, {}).get("damage_type")
+    if dt in _CDRAGON_DAMAGE:
+        return dict(_CDRAGON_DAMAGE[dt])
+    return dict(_DDRAGON_DAMAGE[ddragon.classify_damage_type(name, ddragon_details)])
+
+
+def damage_type(name, lane=None):
+    """'AD', 'AP' or 'Mixed'."""
+    d = damage_profile(name, lane)
+    if d["physical"] >= 0.65:
+        return "AD"
+    if d["magic"] >= 0.65:
+        return "AP"
+    return "Mixed"
+
+
+def tags_of(name):
+    return ddragon_details.get(name, {}).get("tags", [])
+
+
+def attributes(name):
+    """
+    Playstyle ratings (1-3) from the League client's data, with Data Dragon class
+    tags as a fallback: durability, crowd_control, mobility, damage, utility,
+    plus attack_type ("melee"/"ranged"/"") and class roles.
+    """
+    if name in _attr_cache:
+        return _attr_cache[name]
+    cd = cdragon_details.get(name) or {}
+    ps = cd.get("playstyle") or {}
+    tags = set(tags_of(name))
+
+    def rating(key, fallback):
+        v = ps.get(key)
+        return int(v) if isinstance(v, (int, float)) and v > 0 else fallback
+
+    attrs = {
+        "durability": rating("durability", 3 if "Tank" in tags else 2 if "Fighter" in tags else 1),
+        "crowd_control": rating("crowdControl", 2 if tags & {"Tank", "Support", "Mage"} else 1),
+        "mobility": rating("mobility", 3 if "Assassin" in tags else 2 if "Fighter" in tags else 1),
+        "damage": rating("damage", 1 if tags & {"Tank", "Support"} and not tags & {"Mage", "Marksman"} else 3),
+        "utility": rating("utility", 3 if "Support" in tags else 1),
+        "attack_type": cd.get("attack_type") or ("ranged" if "Marksman" in tags else ""),
+        "roles": cd.get("roles") or sorted(t.lower() for t in tags),
+    }
+    _attr_cache[name] = attrs
+    return attrs
+
+
+def is_frontline(name):
+    a = attributes(name)
+    return a["durability"] >= 3 or "tank" in a["roles"]
+
+
+# ---------------------------------------------------------------------------
+# Catalog for the front end
+# ---------------------------------------------------------------------------
+
+def champion_catalog():
+    """Everything the UI needs to render pickers: icons, roles, lane shares, class."""
+    icon_keys = ddragon.get_champion_icon_keys()
+    out = []
+    for name in champions:
+        shares = lane_shares(name)
+        attrs = attributes(name)
+        out.append({
+            "name": name,
+            "icon": icon_keys.get(name, ""),
+            "roles": roles_of(name),
+            "lanes": {l: round(v, 1) for l, v in shares.items() if v >= 1.0},
+            "damage": damage_type(name),
+            "attack_type": attrs["attack_type"],
+            "classes": attrs["roles"],
+        })
+    return out
+
+
+load()

@@ -1,0 +1,9 @@
+{
+  "name": "lol-champion-suggester",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Ranked draft assistant for League of Legends (Flask backend; dev script starts the Python server)",
+  "scripts": {
+    "dev": "python app.py"
+  }
+}

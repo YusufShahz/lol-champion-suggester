@@ -2,331 +2,224 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LoL Champion Suggester</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Champion Suggester · LoL draft assistant</title>
     <meta name="description"
-        content="Get the best champion pick based on enemy counters, team synergy, and role needs.">
+        content="League of Legends draft assistant: estimated win rates from lane matchups, synergy, team composition and counter-pick risk, with live League client sync.">
+    <meta name="color-scheme" content="dark">
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%230c1320' stroke='%23c8aa6e' stroke-width='2'/%3E%3Cpath d='M16 8.5l2.2 4.7 5.1.6-3.8 3.5 1.1 5.1L16 19.8l-4.6 2.6 1.1-5.1-3.8-3.5 5.1-.6z' fill='%23f0d9a0'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://ddragon.leagueoflegends.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Tom Select for searchable dropdowns -->
-    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 </head>
 
 <body>
-    <div class="container">
-        <header class="app-header">
-            <h1>⚔️ Champion Suggester</h1>
-            <p class="subtitle">Find the perfect pick for your team</p>
+    <div class="app">
+        <header class="topbar">
+            <div class="brand">
+                <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="brandGold" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0" stop-color="#f0d9a0" />
+                            <stop offset="1" stop-color="#a8844a" />
+                        </linearGradient>
+                    </defs>
+                    <path d="M16 2l12 7v14l-12 7-12-7V9z" fill="#0c1320" stroke="url(#brandGold)" stroke-width="2" />
+                    <path d="M16 8.5l2.2 4.7 5.1.6-3.8 3.5 1.1 5.1L16 19.8l-4.6 2.6 1.1-5.1-3.8-3.5 5.1-.6z"
+                        fill="url(#brandGold)" />
+                </svg>
+                <div class="brand-text">
+                    <span class="brand-name">Champion Suggester</span>
+                    <span class="brand-sub">Draft assistant</span>
+                </div>
+            </div>
+            <button type="button" class="data-chip" id="dataChip" data-action="open-settings"></button>
+            <div class="topbar-spacer"></div>
+            <button type="button" class="client-pill" id="clientPill" data-state="offline"
+                title="Click to pause or resume syncing with the League client">
+                <span class="client-dot"></span>
+                <span class="client-text" id="clientText">League client offline</span>
+                <span class="client-timer" id="clientTimer"></span>
+            </button>
+            <button type="button" class="btn ghost" id="resetBtn" title="Clear picks and bans">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <span>Reset</span>
+            </button>
+            <button type="button" class="icon-btn" id="settingsBtn" data-action="open-settings" aria-label="Settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zm7.4-2.1l1.8 1.4-1.9 3.3-2.2-.8a7.5 7.5 0 0 1-2 1.2l-.4 2.3h-3.8l-.4-2.3a7.5 7.5 0 0 1-2-1.2l-2.2.8-1.9-3.3 1.8-1.4a7.6 7.6 0 0 1 0-2.8L2.8 9.2l1.9-3.3 2.2.8a7.5 7.5 0 0 1 2-1.2l.4-2.3h3.8l.4 2.3a7.5 7.5 0 0 1 2 1.2l2.2-.8 1.9 3.3-1.8 1.4a7.6 7.6 0 0 1 0 2.8z"
+                        fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+                </svg>
+            </button>
         </header>
 
-        <!-- LCU Status Banner -->
-        <div id="lcuStatus" class="lcu-status lcu-disconnected">
-            <span id="lcuStatusDot" class="status-dot"></span>
-            <span id="lcuStatusText">Client not detected</span>
-            <label class="auto-toggle">
-                <input type="checkbox" id="autoDetectToggle">
-                <span>Auto-detect</span>
-            </label>
-        </div>
-
-        <form id="pickForm" onsubmit="return false;">
-            <!-- Role selection -->
-            <div class="role-bar">
-                <span class="role-label">Your Role</span>
-                <div class="role-pills" id="rolePills">
-                    <button type="button" class="role-pill active" data-role="">All</button>
-                    <button type="button" class="role-pill" data-role="Top">Top</button>
-                    <button type="button" class="role-pill" data-role="Jungle">Jungle</button>
-                    <button type="button" class="role-pill" data-role="Mid">Mid</button>
-                    <button type="button" class="role-pill" data-role="ADC">ADC</button>
-                    <button type="button" class="role-pill" data-role="Support">Support</button>
-                </div>
+        <section class="bans" aria-label="Bans">
+            <div class="ban-group ally">
+                <span class="ban-label">Your bans</span>
+                <div class="ban-slots" id="allyBans"></div>
             </div>
+            <div class="ban-group enemy">
+                <div class="ban-slots" id="enemyBans"></div>
+                <span class="ban-label">Enemy bans</span>
+            </div>
+        </section>
 
-            <div class="picks-grid">
-                <div class="pick-section">
-                    <h2 class="section-title allies-title">Your Team</h2>
-                    <div class="pick-list" id="allyPicks">
-                        {% for i in range(4) %}
-                        <select class="pick-select" id="ally{{i}}" placeholder="Pick ally...">
-                            <option value="">-- Select --</option>
-                            {% for champ in champions %}
-                            <option value="{{ champ }}">{{ champ }}</option>
-                            {% endfor %}
-                        </select>
-                        {% endfor %}
+        <main class="board">
+            <aside class="team ally" aria-label="Your team">
+                <header class="team-head">
+                    <h2>Your team</h2>
+                    <span class="team-meta" id="allyMeta"></span>
+                </header>
+                <ol class="slots" id="allySlots"></ol>
+                <div class="comp" id="allyComp"></div>
+            </aside>
+
+            <section class="center" aria-label="Suggestions">
+                <div class="center-head">
+                    <div class="segmented roles" id="roleSelect" role="radiogroup" aria-label="Your role"></div>
+                    <div class="segmented views" id="viewSelect" role="tablist" aria-label="View">
+                        <button type="button" role="tab" data-view="picks" aria-selected="true">Picks</button>
+                        <button type="button" role="tab" data-view="bans" aria-selected="false">Bans</button>
                     </div>
                 </div>
-                <div class="pick-section">
-                    <h2 class="section-title enemies-title">Enemy Team</h2>
-                    <div class="pick-list" id="enemyPicks">
-                        {% for i in range(5) %}
-                        <select class="pick-select" id="enemy{{i}}" placeholder="Pick enemy...">
-                            <option value="">-- Select --</option>
-                            {% for champ in champions %}
-                            <option value="{{ champ }}">{{ champ }}</option>
-                            {% endfor %}
-                        </select>
-                        {% endfor %}
-                    </div>
+                <div class="filters" id="filters">
+                    <label class="toggle" title="Only suggest champions from your pool">
+                        <input type="checkbox" id="poolOnly"><span>Pool only</span>
+                    </label>
+                    <label class="toggle" id="ownedToggle" hidden
+                        title="Only suggest champions the League client says you can pick">
+                        <input type="checkbox" id="ownedOnly"><span>Pickable only</span>
+                    </label>
+                    <label class="toggle" title="Also suggest champions picked in under 1% of games in the role - their win rates mostly come from specialists">
+                        <input type="checkbox" id="includeNiche"><span>Niche picks</span>
+                    </label>
+                    <span class="filters-info" id="filtersInfo"></span>
                 </div>
-            </div>
+                <div class="progress" id="progress" hidden></div>
+                <div id="notices"></div>
+                <div id="outlook"></div>
+                <div id="myPick"></div>
+                <div class="results" id="results" aria-live="polite"></div>
+                <button type="button" class="btn ghost more" id="moreBtn" hidden>Show more</button>
+            </section>
 
-            <div class="button-group">
-                <button type="button" id="readClientBtn" class="btn btn-secondary">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path
-                            d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5A5.5 5.5 0 1113.5 8 5.51 5.51 0 018 13.5zM8 4a1 1 0 00-1 1v3a1 1 0 00.29.71l2 2a1 1 0 101.42-1.42L9 7.59V5a1 1 0 00-1-1z" />
-                    </svg>
-                    Read from Client
-                </button>
-                <button type="button" id="suggestBtn" class="btn btn-primary">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8 1l2.47 5.01L16 6.64l-4 3.9.94 5.46L8 13.27 3.06 16l.94-5.46-4-3.9 5.53-.63z" />
-                    </svg>
-                    Suggest Champions
-                </button>
-            </div>
-        </form>
+            <aside class="team enemy" aria-label="Enemy team">
+                <header class="team-head">
+                    <h2>Enemy team</h2>
+                    <span class="team-meta" id="enemyMeta"></span>
+                </header>
+                <ol class="slots" id="enemySlots"></ol>
+                <div class="comp" id="enemyComp"></div>
+            </aside>
+        </main>
 
-        <!-- Loading spinner -->
-        <div id="loadingSpinner" class="loading-spinner" style="display:none;">
-            <div class="spinner"></div>
-            <span>Analyzing matchups...</span>
-        </div>
-
-        <div id="suggestions" class="suggestions-container"></div>
-        <button type="button" id="showMoreBtn" class="btn btn-outline show-more-btn" style="display:none;">Show
-            More</button>
+        <footer class="footer" id="footer"></footer>
     </div>
 
-    <script>
-        // --- Globals ---
-        let currentCount = 5;
-        let eventSource = null;
-        let autoSuggestEnabled = false;
-        let ddVersion = '';
-        let iconKeys = {};
-        let tomSelects = {};
-        let selectedRole = '';
-
-        // --- Init: fetch ddragon info and setup Tom Select ---
-        async function init() {
-            try {
-                const resp = await fetch('/api/ddragon');
-                const data = await resp.json();
-                ddVersion = data.version;
-                iconKeys = data.icon_keys;
-            } catch (e) { console.warn('Could not load ddragon info'); }
-            setupTomSelects();
-            setupRolePills();
-        }
-
-        function getChampIconUrl(champName) {
-            if (!ddVersion || !iconKeys[champName]) return '';
-            return `https://ddragon.leagueoflegends.com/cdn/${ddVersion}/img/champion/${iconKeys[champName]}.png`;
-        }
-
-        function setupTomSelects() {
-            document.querySelectorAll('.pick-select').forEach(sel => {
-                const ts = new TomSelect(sel, {
-                    maxItems: 1,
-                    allowEmptyOption: true,
-                    create: false,
-                    sortField: { field: 'text', direction: 'asc' },
-                    render: {
-                        option: function (data, escape) {
-                            const url = getChampIconUrl(data.text);
-                            const img = url ? `<img src="${url}" class="ts-icon" alt="">` : '';
-                            return `<div class="ts-option-row">${img}<span>${escape(data.text)}</span></div>`;
-                        },
-                        item: function (data, escape) {
-                            const url = getChampIconUrl(data.text);
-                            const img = url ? `<img src="${url}" class="ts-icon" alt="">` : '';
-                            return `<div class="ts-item-row">${img}<span>${escape(data.text)}</span></div>`;
-                        }
-                    }
-                });
-                tomSelects[sel.id] = ts;
-            });
-        }
-
-        function setupRolePills() {
-            document.querySelectorAll('.role-pill').forEach(pill => {
-                pill.addEventListener('click', function () {
-                    document.querySelectorAll('.role-pill').forEach(p => p.classList.remove('active'));
-                    this.classList.add('active');
-                    selectedRole = this.dataset.role;
-                });
-            });
-        }
-
-        function setRolePill(role) {
-            document.querySelectorAll('.role-pill').forEach(p => {
-                p.classList.toggle('active', p.dataset.role === role);
-            });
-            selectedRole = role;
-        }
-
-        // --- LCU Status ---
-        const autoToggle = document.getElementById('autoDetectToggle');
-        const statusBanner = document.getElementById('lcuStatus');
-        const statusText = document.getElementById('lcuStatusText');
-
-        function setStatus(state, text) {
-            statusBanner.className = 'lcu-status lcu-' + state;
-            statusText.textContent = text;
-        }
-
-        function applyLcuData(data) {
-            for (let i = 0; i < 4; i++) {
-                const ts = tomSelects['ally' + i];
-                const name = (data.ally_picks || [])[i] || '';
-                if (ts) ts.setValue(name, true);
-            }
-            for (let i = 0; i < 5; i++) {
-                const ts = tomSelects['enemy' + i];
-                const name = (data.enemy_picks || [])[i] || '';
-                if (ts) ts.setValue(name, true);
-            }
-            if (data.assigned_position) {
-                setRolePill(data.assigned_position);
-            }
-        }
-
-        function startSSE() {
-            if (eventSource) return;
-            setStatus('connecting', 'Connecting...');
-            eventSource = new EventSource('/lcu/stream');
-            eventSource.onmessage = function (event) {
-                const data = JSON.parse(event.data);
-                if (data.type === 'champ_select') {
-                    setStatus('active', 'In Champion Select' + (data.phase ? ' — ' + data.phase : ''));
-                    applyLcuData(data);
-                    if (autoSuggestEnabled) fetchAndRenderSuggestions(currentCount);
-                    autoSuggestEnabled = true;
-                } else if (data.type === 'idle') {
-                    setStatus('connected', 'Client running — waiting for champ select');
-                    autoSuggestEnabled = false;
-                } else if (data.type === 'error') {
-                    setStatus('disconnected', data.message || 'Error');
-                }
-            };
-            eventSource.onerror = function () {
-                setStatus('disconnected', 'Connection lost — retrying...');
-                stopSSE();
-                setTimeout(() => { if (autoToggle.checked) startSSE(); }, 5000);
-            };
-        }
-
-        function stopSSE() {
-            if (eventSource) { eventSource.close(); eventSource = null; }
-            autoSuggestEnabled = false;
-        }
-
-        autoToggle.addEventListener('change', function () {
-            if (this.checked) startSSE();
-            else { stopSSE(); setStatus('disconnected', 'Auto-detect off'); }
-        });
-
-        // --- Manual Read ---
-        document.getElementById('readClientBtn').onclick = async function () {
-            this.disabled = true;
-            this.querySelector('svg').classList.add('spin');
-            try {
-                const res = await fetch('/read_champion_select', { method: 'POST' });
-                const data = await res.json();
-                applyLcuData(data);
-            } catch (e) {
-                alert('Could not read from League Client. Make sure the client is running and you are in champion select.');
-            } finally {
-                this.disabled = false;
-                this.querySelector('svg').classList.remove('spin');
-            }
-        };
-
-        // --- Suggestions ---
-        async function fetchSuggestions(count) {
-            const allyPicks = [];
-            const enemyPicks = [];
-            for (let i = 0; i < 4; i++) {
-                const ts = tomSelects['ally' + i];
-                const v = ts ? ts.getValue() : '';
-                if (v) allyPicks.push(v);
-            }
-            for (let i = 0; i < 5; i++) {
-                const ts = tomSelects['enemy' + i];
-                const v = ts ? ts.getValue() : '';
-                if (v) enemyPicks.push(v);
-            }
-            const res = await fetch('/suggest', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ally_picks: allyPicks, enemy_picks: enemyPicks, role: selectedRole, count: count })
-            });
-            return await res.json();
-        }
-
-        function renderSuggestions(suggestions) {
-            const container = document.getElementById('suggestions');
-            document.getElementById('loadingSpinner').style.display = 'none';
-
-            if (!suggestions.length) {
-                container.innerHTML = '<div class="empty-state">No suggestions found. Try different picks or role.</div>';
-                document.getElementById('showMoreBtn').style.display = 'none';
-                return;
-            }
-            container.innerHTML = suggestions.map((s, i) => {
-                const scoreClass = s.score >= 70 ? 'score-high' : s.score >= 40 ? 'score-mid' : 'score-low';
-                const iconUrl = getChampIconUrl(s.champion);
-                const iconHtml = iconUrl ? `<img src="${iconUrl}" class="card-champ-icon" alt="${s.champion}">` : '';
-                const reasonsHtml = s.reasons.map(r => {
-                    let cls = 'reason-role';
-                    if (r.startsWith('Counters ')) cls = 'reason-counter';
-                    else if (r.startsWith('Countered by')) cls = 'reason-countered';
-                    else if (r.startsWith('Synergizes')) cls = 'reason-synergy';
-                    return `<li class="${cls}">${r}</li>`;
-                }).join('');
-                return `
-                <div class="suggestion-card" style="animation-delay: ${i * 0.06}s">
-                    <div class="card-top">
-                        ${iconHtml}
-                        <div class="card-info">
-                            <h3>${s.champion}</h3>
-                            <span class="role-badge">${s.role}</span>
-                        </div>
-                        <div class="score ${scoreClass}">${s.score}</div>
-                    </div>
-                    <ul class="reasons-list">${reasonsHtml}</ul>
+    <dialog id="picker" class="modal picker" aria-labelledby="pickerTitle">
+        <div class="modal-inner">
+            <header class="modal-head">
+                <div>
+                    <h2 id="pickerTitle">Choose a champion</h2>
+                    <p class="modal-sub" id="pickerSub"></p>
                 </div>
-            `;
-            }).join('');
-            document.getElementById('showMoreBtn').style.display = 'block';
-        }
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                </button>
+            </header>
+            <div class="picker-tools">
+                <div class="search">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2" />
+                        <path d="M16 16l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                    <input id="pickerSearch" type="search" placeholder="Search champions" autocomplete="off"
+                        spellcheck="false" aria-label="Search champions">
+                </div>
+                <div class="segmented small" id="pickerRoles" role="radiogroup" aria-label="Filter by role"></div>
+            </div>
+            <div class="picker-grid" id="pickerGrid"></div>
+            <footer class="modal-foot">
+                <span class="hint"><kbd>Enter</kbd> picks the first match · <kbd>Esc</kbd> closes</span>
+                <button type="button" class="btn primary" id="pickerDone" data-action="close-dialog" hidden>Done</button>
+            </footer>
+        </div>
+    </dialog>
 
-        async function fetchAndRenderSuggestions(count) {
-            document.getElementById('loadingSpinner').style.display = 'flex';
-            document.getElementById('suggestions').innerHTML = '';
-            document.getElementById('showMoreBtn').style.display = 'none';
-            const suggestions = await fetchSuggestions(count);
-            renderSuggestions(suggestions);
-        }
+    <dialog id="settings" class="modal settings" aria-labelledby="settingsTitle">
+        <div class="modal-inner">
+            <header class="modal-head">
+                <h2 id="settingsTitle">Settings</h2>
+                <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                </button>
+            </header>
+            <div class="settings-body">
+                <section class="setting">
+                    <div class="setting-head">
+                        <h3>Champion pool</h3>
+                        <span class="setting-count" id="poolCount"></span>
+                    </div>
+                    <p class="hint">Champions you play well. They get a comfort bonus, are never hidden as niche
+                        picks, are left out of ban suggestions and power <em>Pool only</em>.</p>
+                    <div class="pool-list" id="poolList"></div>
+                    <div class="setting-actions">
+                        <button type="button" class="btn" id="poolAdd">Add champions</button>
+                        <button type="button" class="btn" id="poolImport" disabled
+                            title="Needs the League client running">Import top mastery</button>
+                        <button type="button" class="btn ghost danger" id="poolClear">Clear pool</button>
+                    </div>
+                </section>
+                <section class="setting">
+                    <div class="setting-head">
+                        <h3>Comfort bonus</h3>
+                        <output id="comfortOut" for="comfort"></output>
+                    </div>
+                    <input type="range" id="comfort" min="0" max="5" step="0.5">
+                    <p class="hint">Win-rate points added to pool champions: roughly how much better you play them
+                        than an average player in your bracket.</p>
+                </section>
+                <section class="setting">
+                    <div class="setting-head">
+                        <h3>League client</h3>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="liveSync">
+                        <span class="switch-track"></span>
+                        <span>Sync champion select automatically</span>
+                    </label>
+                    <p class="hint">Reads picks, hovers, bans, assigned roles and the timer from the League client
+                        running on this PC. Nothing is sent anywhere else.</p>
+                </section>
+                <section class="setting">
+                    <div class="setting-head">
+                        <h3>Data</h3>
+                    </div>
+                    <p class="data-info" id="dataInfo"></p>
+                    <p class="hint">Refresh with <code>py data/update_data.py</code>. The running app picks up new
+                        data automatically.</p>
+                </section>
+            </div>
+        </div>
+    </dialog>
 
-        document.getElementById('suggestBtn').onclick = async function () {
-            currentCount = 5;
-            await fetchAndRenderSuggestions(currentCount);
-        };
+    <div id="roleMenu" class="menu" role="menu" hidden></div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
 
-        document.getElementById('showMoreBtn').onclick = async function () {
-            currentCount += 5;
-            await fetchAndRenderSuggestions(currentCount);
-        };
-
-        // Boot
-        init();
-    </script>
+    <script id="bootstrap" type="application/json">{{ bootstrap|tojson }}</script>
+    <script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 
 </html>

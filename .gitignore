@@ -72,6 +72,9 @@ poetry.lock
 # dotenv
 .env
 
+# Interrupted data writes
+data/*.tmp
+
 # VS Code
 .vscode/
 
